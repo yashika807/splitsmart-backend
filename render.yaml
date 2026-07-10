@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: splitsmart-backend
+    runtime: docker
+    plan: free
+    envVars:
+      - key: DATASOURCE_HOST
+        fromDatabase:
+          name: splitsmart-db
+          property: host
+      - key: DATASOURCE_PORT
+        fromDatabase:
+          name: splitsmart-db
+          property: port
+      - key: DATASOURCE_NAME
+        fromDatabase:
+          name: splitsmart-db
+          property: database
+      - key: DATASOURCE_USERNAME
+        fromDatabase:
+          name: splitsmart-db
+          property: user
+      - key: DATASOURCE_PASSWORD
+        fromDatabase:
+          name: splitsmart-db
+          property: password
+      - key: GEMINI_API_KEY
+        sync: false
+
+databases:
+  - name: splitsmart-db
+    plan: free
