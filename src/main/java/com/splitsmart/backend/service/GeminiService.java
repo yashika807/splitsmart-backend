@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.splitsmart.backend.dto.ParsedExpense;
 import com.splitsmart.backend.dto.ReceiptItem;
 import com.splitsmart.backend.dto.ReceiptParseResult;
+import com.splitsmart.backend.exception.GeminiQuotaExceededException;
 import com.splitsmart.backend.exception.ReceiptParseException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -65,6 +66,8 @@ public class GeminiService {
                     new Part(prompt),
                     new Part(new InlineData(mimeType, base64Image))
             ));
+        } catch (GeminiQuotaExceededException e) {
+            throw e;
         } catch (RuntimeException e) {
             throw new ReceiptParseException("The AI couldn't process that receipt image. Try again?");
         }
@@ -103,21 +106,64 @@ public class GeminiService {
         return new ReceiptParseResult(items, subtotal, tax, tip);
     }
 
+    private static final int MAX_ATTEMPTS = 3;
+
     private String callGemini(List<Part> parts) {
         String url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=" + apiKey;
 
+        String requestBody;
         try {
-            String requestBody = objectMapper.writeValueAsString(new GeminiRequest(parts));
+            requestBody = objectMapper.writeValueAsString(new GeminiRequest(parts));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to build Gemini request", e);
+        }
 
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                    .build();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .build();
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            HttpResponse<String> response;
+            try {
+                response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            } catch (Exception e) {
+                if (attempt == MAX_ATTEMPTS) {
+                    throw new RuntimeException("Failed to call Gemini API", e);
+                }
+                backoff(attempt);
+                continue;
+            }
 
-            JsonNode root = objectMapper.readTree(response.body());
+            if (response.statusCode() == 429 && isQuotaExhausted(response.body())) {
+                // Gemini's free tier caps this model at a small number of requests
+                // PER DAY, not per minute — retrying within this request is pointless,
+                // it won't recover until the quota resets. Fail fast with an honest
+                // message instead of pretending a short retry will fix it.
+                throw new GeminiQuotaExceededException(
+                        "The AI parser has hit its daily usage limit on the free tier. "
+                                + "Try again later, or use manual entry below.");
+            }
+
+            // Anything else 429/5xx is more likely a brief overload — worth a
+            // short retry rather than failing the user's request outright.
+            boolean transientFailure = response.statusCode() == 429 || response.statusCode() >= 500;
+            if (transientFailure) {
+                if (attempt == MAX_ATTEMPTS) {
+                    throw new RuntimeException("Gemini API error (status " + response.statusCode() + "): " + response.body());
+                }
+                backoff(attempt);
+                continue;
+            }
+
+            JsonNode root;
+            try {
+                root = objectMapper.readTree(response.body());
+            } catch (Exception e) {
+                throw new RuntimeException("Gemini returned an unparseable response: " + response.body());
+            }
+
             if (!root.has("candidates")) {
                 throw new RuntimeException("Gemini API error: " + response.body());
             }
@@ -130,10 +176,21 @@ public class GeminiService {
                     .asText();
 
             return rawText.replace("```json", "").replace("```", "").trim();
-        } catch (RuntimeException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to call Gemini API", e);
+        }
+
+        throw new RuntimeException("Failed to call Gemini API after " + MAX_ATTEMPTS + " attempts");
+    }
+
+    private boolean isQuotaExhausted(String responseBody) {
+        return responseBody.contains("RESOURCE_EXHAUSTED")
+                || responseBody.contains("exceeded your current quota");
+    }
+
+    private void backoff(int attempt) {
+        try {
+            Thread.sleep(400L * attempt);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 

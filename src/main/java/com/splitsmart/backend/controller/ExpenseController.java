@@ -2,6 +2,7 @@ package com.splitsmart.backend.controller;
 
 import com.splitsmart.backend.dto.ParsedExpense;
 import com.splitsmart.backend.dto.ReceiptParseResult;
+import com.splitsmart.backend.exception.GeminiQuotaExceededException;
 import com.splitsmart.backend.exception.ReceiptParseException;
 import com.splitsmart.backend.model.Expense;
 import com.splitsmart.backend.repository.ExpenseRepository;
@@ -41,9 +42,21 @@ public class ExpenseController {
     }
 
     @PostMapping("/parse")
-    public List<ParsedExpense> parseExpenses(@RequestBody Map<String, String> body) throws Exception {
+    public ResponseEntity<?> parseExpenses(@RequestBody Map<String, String> body) {
         String text = body.get("text");
-        return geminiService.parseExpenses(text);
+        if (text == null || text.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "No text provided."));
+        }
+
+        try {
+            List<ParsedExpense> expenses = geminiService.parseExpenses(text);
+            return ResponseEntity.ok(expenses);
+        } catch (GeminiQuotaExceededException e) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Map.of("error", "The AI parser is having trouble right now — try again in a moment."));
+        }
     }
 
     @PostMapping("/parse-receipt")
@@ -59,6 +72,8 @@ public class ExpenseController {
         try {
             ReceiptParseResult result = geminiService.parseReceipt(file.getBytes(), contentType);
             return ResponseEntity.ok(result);
+        } catch (GeminiQuotaExceededException e) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(Map.of("error", e.getMessage()));
         } catch (ReceiptParseException e) {
             return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
