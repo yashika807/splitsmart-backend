@@ -10,6 +10,7 @@ public class Expense {
     private Long id;
     private String name;
     private Double amount;
+    private String context = "Trip";
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -17,4 +18,6 @@ public class Expense {
     public void setName(String name) { this.name = name; }
     public Double getAmount() { return amount; }
     public void setAmount(Double amount) { this.amount = amount; }
+    public String getContext() { return context; }
+    public void setContext(String context) { this.context = context; }
 }
