@@ -5,6 +5,14 @@ a group expense splitter. Handles expense persistence and proxies natural-langua
 expense parsing to Google's Gemini API so the API key never has to live in the
 browser.
 
+**Live API:** [splitsmart-backend-62g9.onrender.com](https://splitsmart-backend-62g9.onrender.com)
+(free tier — spins down after 15 min idle, first request after that takes
+~30-60s to wake up)
+
+Deployed on [Render](https://render.com) via the `render.yaml` Blueprint in
+this repo, which provisions a free web service (built from `Dockerfile`) and
+a free Postgres database together. Every push to `main` auto-redeploys.
+
 ## Tech stack
 
 Java 21, Spring Boot 3.5 (Web, Data JPA), PostgreSQL 18. Talks to Gemini
@@ -189,7 +197,7 @@ for the full flow and the data-model reasoning.
 - [x] Trip/Family context field on expenses
 - [x] Receipt photo parsing endpoint (vision, itemized, with tax/tip detection)
 - [x] Secrets kept out of source control
-- [ ] Deployed anywhere — currently local-only, no Render/Railway/Fly.io setup
+- [x] Deployed on Render with CI/CD (Docker build, auto-deploy on push)
 - [ ] Real test coverage — only the default Spring Boot smoke test exists
 - [ ] Input validation (negative amounts, blank names, oversized text to `/parse`)
 - [ ] CORS restricted to the actual frontend origin (currently `@CrossOrigin(origins = "*")`)
